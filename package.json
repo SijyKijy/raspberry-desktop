@@ -41,11 +41,8 @@
       "dist/preload.js",
       "package.json",
       "loader.html",
-      "auth-window.html",
       "torrent-wizard.html",
       "magnet-input.html",
-      "mirror-selection.html",
-      "prebuilts/config.json",
       "prebuilts/adblock.txt"
     ],
     "protocols": [
@@ -67,10 +64,6 @@
           "to": "resources/app/dist/prebuilts/windows/player"
         },
         {
-          "from": "prebuilts/config.json",
-          "to": "resources/app/prebuilts/config.json"
-        },
-        {
           "from": "prebuilts/adblock.txt",
           "to": "resources/app/prebuilts/adblock.txt"
         }
@@ -81,10 +74,6 @@
       "target": "dmg",
       "artifactName": "ReYohoho.Setup.${version}_${arch}.${ext}",
       "extraFiles": [
-        {
-          "from": "prebuilts/config.json",
-          "to": "resources/app/prebuilts/config.json"
-        },
         {
           "from": "prebuilts/adblock.txt",
           "to": "resources/app/prebuilts/adblock.txt"
@@ -97,10 +86,6 @@
       "artifactName": "ReYohoho.Setup.${version}_${arch}.${ext}",
       "category": "AudioVideo",
       "extraFiles": [
-        {
-          "from": "prebuilts/config.json",
-          "to": "resources/app/prebuilts/config.json"
-        },
         {
           "from": "prebuilts/adblock.txt",
           "to": "resources/app/prebuilts/adblock.txt"

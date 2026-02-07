@@ -1,5 +1,4 @@
 import { ElectronBlocker } from '@ghostery/adblocker-electron';
-import fetch from 'cross-fetch';
 import { app, BrowserWindow, dialog, session, globalShortcut, shell, screen, Menu, ipcMain, Rectangle } from 'electron';
 import { createTorrentsWindow } from './torrents.js'
 import Store from 'electron-store';
@@ -8,12 +7,13 @@ import path from "node:path";
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import fs from 'fs';
+import fetch from 'cross-fetch';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const { autoUpdater } = pkg;
 
-const APP_NAME = `${app.getVersion()}`;
+const APP_NAME = `Raspberry ${app.getVersion()}`;
 
 app.commandLine.appendSwitch('disable-site-isolation-trials');
 
@@ -23,54 +23,61 @@ const store = new Store({});
 
 const isDebug = !app.isPackaged;
 
-const config_main_path = path.join(__dirname, '../prebuilts/config.json');
 const adblock_path = path.join(__dirname, '../prebuilts/adblock.txt');
 
-const AUTH_API_BASES = ['https://api.rhserv.vu', 'https://api4.rhserv.vu'];
-
-/** Check auth against both API servers; first successful response wins (no wait for the other). */
-async function checkAuthBothServers(login: string, password: string): Promise<boolean> {
-  const credentials = `${login}:${password}`;
-  const base64Credentials = Buffer.from(credentials).toString('base64');
-  const authHeader = `Basic ${base64Credentials}`;
-
-  const checkOne = async (base: string): Promise<boolean> => {
-    const url = `${base}/auth/check`;
-    try {
-      const res = await fetch(url, {
-        method: 'GET',
-        headers: { Authorization: authHeader },
-        signal: AbortSignal.timeout?.(10000) ?? undefined,
-      });
-      console.log('[auth]', url, '->', res.status, res.statusText);
-      return res.status === 200;
-    } catch (err) {
-      console.warn('[auth]', url, 'error:', err);
-      return false;
-    }
-  };
-
-  console.log('[auth] Checking credentials for login:', login, 'against', AUTH_API_BASES.length, 'servers');
-  const p1 = checkOne(AUTH_API_BASES[0]);
-  const p2 = checkOne(AUTH_API_BASES[1]);
-  const firstSuccess = Promise.race([
-    p1.then((ok) => (ok ? true : Promise.reject())),
-    p2.then((ok) => (ok ? true : Promise.reject())),
-  ]);
-  const result = await firstSuccess.catch(() => Promise.all([p1, p2]).then(([a, b]) => a || b));
-  console.log('[auth] Result:', result ? 'OK' : 'FAIL');
-  return result;
-}
 
 autoUpdater.autoInstallOnAppQuit = true;
 if (process.platform === 'darwin') {
   autoUpdater.autoDownload = false;
 }
 
-let main_site_url;
+const _k = 0x5A;
+const _d = (h: string) => { const r: number[] = []; for (let i = 0; i < h.length; i += 2) r.push(parseInt(h.substring(i, i + 2), 16) ^ _k); return Buffer.from(r).toString(); };
+let main_site_url = _d('322e2e2a29607575283b292a383f282823742a2f38');
 let deep_link_data: String | null;
 
-let authWindow: BrowserWindow | null = null;
+let cachedBase64Credentials: string | null = null;
+
+async function fetchRemoteConfig(): Promise<void> {
+  if (!cachedBase64Credentials) return;
+  try {
+    const response = await fetch(`${main_site_url}/api/config`, {
+      headers: {
+        'Authorization': `Basic ${cachedBase64Credentials}`
+      },
+      signal: AbortSignal.timeout(10000)
+    });
+    if (response.ok) {
+      appConfig = await response.json();
+      if (appConfig?.main_site_url) {
+        main_site_url = appConfig.main_site_url;
+      }
+      console.log('Remote config loaded successfully');
+    } else {
+      console.error('Failed to fetch remote config:', response.status);
+    }
+  } catch (error) {
+    console.error('Error fetching remote config:', error);
+  }
+}
+
+async function updateCachedCredentials(): Promise<void> {
+  if (!mainWindow) return;
+  try {
+    const authData = await mainWindow.webContents.executeJavaScript(`localStorage.getItem('siteAuth')`);
+    if (authData) {
+      const parsed = JSON.parse(authData);
+      if (parsed.credentials) {
+        cachedBase64Credentials = parsed.credentials;
+        if (!appConfig) {
+          await fetchRemoteConfig();
+        }
+        return;
+      }
+    }
+  } catch {}
+  cachedBase64Credentials = null;
+}
 
 function createMacOSMenu(): Menu | null {
   if (process.platform !== 'darwin') {
@@ -168,61 +175,36 @@ async function getMetaContent(selector: string) {
   }
 }
 
-let isNewCredsStored = false;
-
-function checkStoredCredentials(): void {
-  const login = store.get('login', '') as string;
-  const password = store.get('password', '') as string;
-  if (login && password) {
-    isNewCredsStored = true;
-  }
-}
-
 async function openTorrents() {
-  if (isNewCredsStored) {
-    const credentials = `${store.get('login', '') as string}:${store.get('password', '') as string}`;
-    const base64Credentials = Buffer.from(credentials).toString("base64");
-    const titleAndYear = await getMetaContent('title-and-year');
-    const altName = await getMetaContent('original-title');
-
-    const match = titleAndYear.match(/^(.*?)\s*\((\d{4})\)$/);
-    const title = match ? match[1].trim() : titleAndYear.replace(/\s*\(.*\)$/, "");
-    const year = match ? match[2] : null;
-
-    createTorrentsWindow(title, year, altName, appConfig!, base64Credentials);
-  } else {
-    const authResult = await createAuthWindow();
-
-    if (authResult) {
-      const credentials = `${authResult.login}:${authResult.password}`;
-      const base64Credentials = Buffer.from(credentials).toString("base64");
-      const titleAndYear = await getMetaContent('title-and-year');
-      const altName = await getMetaContent('original-title');
-
-      const match = titleAndYear.match(/^(.*?)\s*\((\d{4})\)$/);
-      const title = match ? match[1].trim() : titleAndYear.replace(/\s*\(.*\)$/, "");
-      const year = match ? match[2] : null;
-
-      createTorrentsWindow(title, year, altName, appConfig!, base64Credentials);
-    }
+  await updateCachedCredentials();
+  if (!cachedBase64Credentials) {
+    mainWindow?.webContents.executeJavaScript(
+      `window.electronAPI.showToast('Необходимо войти в аккаунт')`
+    );
+    return;
   }
+  if (!appConfig) {
+    mainWindow?.webContents.executeJavaScript(
+      `window.electronAPI.showToast('Конфигурация загружается, попробуйте снова')`
+    );
+    return;
+  }
+  const titleAndYear = await getMetaContent('title-and-year');
+  const altName = await getMetaContent('original-title');
+
+  const match = titleAndYear.match(/^(.*?)\s*\((\d{4})\)$/);
+  const title = match ? match[1].trim() : titleAndYear.replace(/\s*\(.*\)$/, "");
+  const year = match ? match[2] : null;
+
+  createTorrentsWindow(title, year, altName, appConfig, cachedBase64Credentials);
 }
 
-async function changeCredentials() {
-  const authResult = await createAuthWindow();
-  if (authResult) {
-    const credentials = `${authResult.login}:${authResult.password}`;
-    const base64Credentials = Buffer.from(credentials).toString("base64");
-    const titleAndYear = await getMetaContent('title-and-year');
-    const altName = await getMetaContent('original-title');
-
-    const match = titleAndYear.match(/^(.*?)\s*\((\d{4})\)$/);
-    const title = match ? match[1].trim() : titleAndYear.replace(/\s*\(.*\)$/, "");
-    const year = match ? match[2] : null;
-
-    createTorrentsWindow(title, year, altName, appConfig!, base64Credentials);
-  }
-}
+const logout = (): void => {
+  mainWindow?.webContents.executeJavaScript(`localStorage.removeItem('siteAuth')`).then(() => {
+    cachedBase64Credentials = null;
+    mainWindow?.reload();
+  });
+};
 
 const switchBlurVideo = (): void => {
   const switchBlurScript = `
@@ -367,9 +349,6 @@ export interface AppConfig {
 
 function loadConfig(): void {
   try {
-    const configRaw = fs.readFileSync(config_main_path, 'utf-8');
-    appConfig = JSON.parse(configRaw);
-
     const filter = {
       urls: ['*://*/*']
     };
@@ -378,52 +357,34 @@ function loadConfig(): void {
 
     session.defaultSession.webRequest.onBeforeSendHeaders(filter, (details, callback) => {
       try {
-        if (details.requestHeaders['Referer'] && details.requestHeaders['Referer'].includes(appConfig!.alloha_referer)) {
-          details.requestHeaders['Origin'] = appConfig!.alloha_origin_url;
-        }
-        if (details.url.includes('stream-balancer')) {
-          details.requestHeaders['User-Agent'] = chromeUserAgent;
-          details.requestHeaders['sec-ch-ua'] = '"Google Chrome";v="132", "Chromium";v="132", "Not A(Brand";v="24"';
+        if (appConfig) {
+          if (details.requestHeaders['Referer'] && details.requestHeaders['Referer'].includes(appConfig.alloha_referer)) {
+            details.requestHeaders['Origin'] = appConfig.alloha_origin_url;
+          }
+          if (details.url.includes('stream-balancer')) {
+            details.requestHeaders['User-Agent'] = chromeUserAgent;
+            details.requestHeaders['sec-ch-ua'] = '"Google Chrome";v="132", "Chromium";v="132", "Not A(Brand";v="24"';
+          }
         }
         const url = new URL(details.url);
-        if ((url.hostname === 'api4.rhserv.vu' || url.hostname === 'api.rhserv.vu') && url.pathname.startsWith('/cache')) {
-          const login = store.get('login', '') as string;
-          const password = store.get('password', '') as string;
-          if (login && password) {
-            const credentials = `${login}:${password}`;
-            const base64Credentials = Buffer.from(credentials).toString('base64');
-            details.requestHeaders['Authorization'] = `Basic ${base64Credentials}`;
+        if (url.hostname === _d('283b292a383f282823742a2f38') && url.pathname.startsWith('/cache')) {
+          if (cachedBase64Credentials) {
+            details.requestHeaders['Authorization'] = `Basic ${cachedBase64Credentials}`;
           }
         }
         callback({ requestHeaders: details.requestHeaders });
       } catch (e) {
         console.error('Error in onBeforeSendHeaders:', e);
+        callback({ requestHeaders: details.requestHeaders });
       }
     });
 
     (async () => {
-      const login = store.get('login', '') as string;
-      const password = store.get('password', '') as string;
-
-      if (login && password) {
-        const ok = await checkAuthBothServers(login, password);
-        if (ok) {
-          isNewCredsStored = true;
-          createWindow('132');
-          return;
-        }
-      }
-
-      const result = await createAuthWindow();
-      if (result) {
-        createWindow('132');
-      } else {
-        app.quit();
-      }
+      createWindow();
     })();
   } catch (error) {
     console.error('Error load config:', error);
-    createWindow(error);
+    createWindow();
   }
 }
 
@@ -436,7 +397,7 @@ function registerHotkeys(): void {
   globalShortcut.register('F6', decreasePlaybackSpeed);
   globalShortcut.register('F7', resetPlaybackSpeed);
   globalShortcut.register('F8', increasePlaybackSpeed);
-  globalShortcut.register('F9', changeCredentials);
+  globalShortcut.register('F9', logout);
   globalShortcut.register('F10', toggleMenu);
   // globalShortcut.register('F11', () => {
   //   mainWindow?.webContents.toggleDevTools();
@@ -444,88 +405,8 @@ function registerHotkeys(): void {
   globalShortcut.register('CommandOrControl+F5', reloadIgnoringCache);
 }
 
-function changeWebUrlMirror(): void {
-  if (!mainWindow) return;
-  createMirrorSelectionWindow();
-}
 
-let mirrorSelectionWindow: BrowserWindow | null = null;
-
-function createMirrorSelectionWindow(): Promise<string | null> {
-  return new Promise((resolve) => {
-    if (mirrorSelectionWindow) {
-      mirrorSelectionWindow.focus();
-      return;
-    }
-
-    mirrorSelectionWindow = new BrowserWindow({
-      width: 600,
-      height: 700,
-      resizable: false,
-      maximizable: false,
-      minimizable: false,
-      alwaysOnTop: false,
-      modal: true,
-      parent: mainWindow!,
-      show: false,
-      frame: false,
-      transparent: true,
-      backgroundColor: '#00000000',
-      icon: 'icon.png',
-      webPreferences: {
-        nodeIntegration: true,
-        contextIsolation: false,
-      }
-    });
-
-    const handleMirrorSelected = (event: any, selectedMirror: string) => {
-      store.set("user_mirror3", selectedMirror);
-      main_site_url = selectedMirror;
-      mainWindow?.loadURL(main_site_url);
-
-      if (mirrorSelectionWindow) {
-        mirrorSelectionWindow.close();
-        mirrorSelectionWindow = null;
-      }
-
-      ipcMain.removeListener('mirror-selected', handleMirrorSelected);
-      ipcMain.removeListener('mirror-cancelled', handleMirrorCancelled);
-
-      resolve(selectedMirror);
-    };
-
-    const handleMirrorCancelled = () => {
-      if (mirrorSelectionWindow) {
-        mirrorSelectionWindow.close();
-        mirrorSelectionWindow = null;
-      }
-
-      ipcMain.removeListener('mirror-selected', handleMirrorSelected);
-      ipcMain.removeListener('mirror-cancelled', handleMirrorCancelled);
-
-      resolve(null);
-    };
-
-    ipcMain.on('mirror-selected', handleMirrorSelected);
-    ipcMain.on('mirror-cancelled', handleMirrorCancelled);
-
-    mirrorSelectionWindow.on('closed', () => {
-      mirrorSelectionWindow = null;
-      ipcMain.removeListener('mirror-selected', handleMirrorSelected);
-      ipcMain.removeListener('mirror-cancelled', handleMirrorCancelled);
-      resolve(null);
-    });
-
-    mirrorSelectionWindow.loadFile('mirror-selection.html');
-
-    mirrorSelectionWindow.once('ready-to-show', () => {
-      mirrorSelectionWindow?.show();
-      mirrorSelectionWindow?.focus();
-    });
-  });
-}
-
-async function createWindow(configError: any | ''): Promise<void> {
+async function createWindow(): Promise<void> {
   if (!mainWindow) {
     mainWindow = new BrowserWindow({
       width: screen.getPrimaryDisplay().workAreaSize.width,
@@ -543,32 +424,11 @@ async function createWindow(configError: any | ''): Promise<void> {
     });
   }
 
-  if (!appConfig) {
-    if (mainWindow != null) {
-      dialog.showMessageBox(mainWindow, {
-        noLink: true,
-        type: 'error',
-        title: `Произошла ошибка при загрузке конфига, открыть канал с обновлениями в ТГ?`,
-        message: `${configError}`,
-        buttons: ['Закрыть', 'Открыть'],
-      }).then((result) => {
-        if (result.response === 1) {
-          shell.openExternal('https://t.me/reyohoho_desktop');
-        } else {
-          if (process.platform !== 'darwin') app.quit();
-        }
-      });
-    }
-    return;
-  }
-
   mainWindow.setBounds(store.get('bounds') as Rectangle)
 
   mainWindow.on('close', () => {
     store.set('bounds', mainWindow!.getBounds())
   })
-
-  main_site_url = store.get('user_mirror3', appConfig!.main_site_url) as string;
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.maximize();
@@ -634,7 +494,7 @@ async function createWindow(configError: any | ''): Promise<void> {
     
     // Inject top menu bar
     const currentUrl = mainWindow?.webContents.getURL() || '';
-    if (!currentUrl.includes('loader.html') && !currentUrl.includes('auth-window.html') && !currentUrl.includes('mirror-selection.html') && !currentUrl.includes('magnet-input.html') && !currentUrl.includes('torrent-wizard.html')) {
+    if (!currentUrl.includes('loader.html') && !currentUrl.includes('magnet-input.html') && !currentUrl.includes('torrent-wizard.html')) {
       mainWindow?.webContents.executeJavaScript(`
         (function() {
           if (document.getElementById('reyohoho-top-menu')) return;
@@ -830,7 +690,7 @@ async function createWindow(configError: any | ''): Promise<void> {
                 <i class="fas fa-film"></i> <span class="btn-text">Полка</span> <span class="hotkey">F1</span>
               </button>
               <button class="menu-btn" onclick="window.electronAPI.sendHotKey('F9')">
-                <i class="fas fa-key"></i> <span class="btn-text">Аккаунт</span> <span class="hotkey">F9</span>
+                <i class="fas fa-right-from-bracket"></i> <span class="btn-text">Выйти</span> <span class="hotkey">F9</span>
               </button>
               <div class="menu-divider player-control"></div>
               <button id="blur-btn" class="menu-btn player-control" onclick="window.electronAPI.sendHotKey('F2')">
@@ -855,10 +715,6 @@ async function createWindow(configError: any | ''): Promise<void> {
               </button>
               <button class="menu-btn player-control" onclick="window.electronAPI.sendHotKey('F8')">
                 <i class="fas fa-forward"></i> <span class="btn-text">+0.25x</span> <span class="hotkey">F8</span>
-              </button>
-              <div class="menu-divider"></div>
-              <button class="menu-btn" onclick="window.electronAPI.openMirrorSelection()">
-                <i class="fas fa-globe"></i> <span class="btn-text">Сменить зеркало</span>
               </button>
               <div class="menu-divider"></div>
               <button class="menu-btn" onclick="window.electronAPI.sendHotKey('F10')">
@@ -958,6 +814,9 @@ async function createWindow(configError: any | ''): Promise<void> {
         })();
       `);
     }
+
+    // Update cached credentials from site's localStorage
+    updateCachedCredentials();
     
     if (currentUrl.endsWith('loader.html') || currentUrl.startsWith('file://') && currentUrl.includes('loader.html')) {
       if (deep_link_data) {
@@ -1008,7 +867,7 @@ async function createWindow(configError: any | ''): Promise<void> {
         return;
 
       case 'F9':
-        changeCredentials();
+        logout();
         return;
 
       case 'F10':
@@ -1061,107 +920,7 @@ async function createWindow(configError: any | ''): Promise<void> {
 
 }
 
-function executeRepeatedly(callback: () => void, interval: number): void {
-  setInterval(callback, interval);
-}
 
-function createAuthWindow(): Promise<{ login: string; password: string } | null> {
-  return new Promise((resolve) => {
-    if (authWindow) {
-      authWindow.focus();
-      return;
-    }
-
-    authWindow = new BrowserWindow({
-      width: 480,
-      height: 520,
-      resizable: false,
-      maximizable: false,
-      minimizable: false,
-      alwaysOnTop: false,
-      modal: !!mainWindow,
-      parent: mainWindow ?? undefined,
-      show: false,
-      frame: false,
-      transparent: true,
-      backgroundColor: '#00000000',
-      icon: 'icon.png',
-      webPreferences: {
-        nodeIntegration: true,
-        contextIsolation: false,
-      }
-    });
-
-    const handleShowInputContextMenu = () => {
-      if (authWindow) {
-        const InputMenu = Menu.buildFromTemplate([
-          { label: 'Вырезать', role: 'cut' },
-          { label: 'Копировать', role: 'copy' },
-          { label: 'Вставить', role: 'paste' },
-          { type: 'separator' },
-          { label: 'Выделить все', role: 'selectAll' },
-        ]);
-        InputMenu.popup({ window: authWindow });
-      }
-    };
-
-    const handleAuthSubmitted = async (event: any, data: { login: string; password: string }) => {
-      const ok = await checkAuthBothServers(data.login, data.password);
-      if (!ok) {
-        console.warn('[auth] Rejected: both servers returned non-200 for login:', data.login);
-        authWindow?.webContents.send('auth-error', 'Неверный логин или пароль');
-        return;
-      }
-      store.set("login", data.login);
-      store.set("password", data.password);
-      isNewCredsStored = true;
-
-      if (authWindow) {
-        authWindow.close();
-        authWindow = null;
-      }
-
-      ipcMain.removeListener('auth-submitted', handleAuthSubmitted);
-      ipcMain.removeListener('auth-cancelled', handleAuthCancelled);
-      ipcMain.removeListener('show-input-context-menu', handleShowInputContextMenu);
-
-      resolve(data);
-    };
-
-    const handleAuthCancelled = () => {
-      if (authWindow) {
-        authWindow.close();
-        authWindow = null;
-      }
-
-      ipcMain.removeListener('auth-submitted', handleAuthSubmitted);
-      ipcMain.removeListener('auth-cancelled', handleAuthCancelled);
-      ipcMain.removeListener('show-input-context-menu', handleShowInputContextMenu);
-
-      resolve(null);
-    };
-
-    ipcMain.on('auth-submitted', handleAuthSubmitted);
-    ipcMain.on('auth-cancelled', handleAuthCancelled);
-
-    ipcMain.on('show-input-context-menu', handleShowInputContextMenu);
-
-    authWindow.on('closed', () => {
-      authWindow = null;
-      ipcMain.removeListener('auth-submitted', handleAuthSubmitted);
-      ipcMain.removeListener('auth-cancelled', handleAuthCancelled);
-      ipcMain.removeListener('show-input-context-menu', handleShowInputContextMenu);
-      resolve(null);
-    });
-
-    authWindow.loadFile('auth-window.html');
-
-    authWindow.once('ready-to-show', () => {
-      authWindow?.show();
-      authWindow?.focus();
-    });
-  });
-}
 
 app.whenReady().then(() => {
   app.setAsDefaultProtocolClient('reyohoho');
@@ -1191,40 +950,14 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle('get-stored-credentials', () => {
-    return {
-      login: store.get('login', '') as string,
-      password: store.get('password', '') as string
-    };
-  });
-
   ipcMain.handle('get-app-config', () => {
     return appConfig;
-  });
-
-  ipcMain.handle('get-stored-mirror', () => {
-    return store.get('user_mirror3', appConfig?.main_site_url || '') as string;
   });
 
   ipcMain.handle('open-external', (event, url) => {
     shell.openExternal(url);
   });
 
-  ipcMain.handle('get-mirrors-list', () => {
-    return `Проверить доступность:
-http://37.252.0.116:4433/check.html
-
-Новый фронтенд:
-https://reyohoho.gitlab.io/reyohoho
-https://reyohoho.serv00.net
-
-Старый фронтенд:
-https://reyohoho.surge.sh
-https://mazda1337.github.io/reyohoho
-`;
-  });
-
-  checkStoredCredentials();
   loadConfig();
   registerHotkeys();
 
@@ -1254,7 +987,8 @@ app.on('web-contents-created', (e, wc) => {
       });
     } catch (e) { }
 
-    if (handler.url.startsWith(appConfig!.url_handler_deny)) {
+    const denyUrl = appConfig?.url_handler_deny || main_site_url;
+    if (handler.url.startsWith(denyUrl)) {
       mainWindow?.loadURL(handler.url);
       return { action: "deny" };
     } else {
@@ -1327,6 +1061,3 @@ autoUpdater.on('update-downloaded', (info) => {
   showUpdateAvailableDialog();
 });
 
-ipcMain.on('open-mirror-selection', () => {
-  changeWebUrlMirror();
-});
