@@ -379,6 +379,27 @@ function loadConfig(): void {
       }
     });
 
+    session.defaultSession.webRequest.onHeadersReceived(filter, (details, callback) => {
+      try {
+        const responseHeaders = details.responseHeaders || {};
+        
+        if (!responseHeaders['Access-Control-Allow-Origin']) {
+          responseHeaders['Access-Control-Allow-Origin'] = ['*'];
+        }
+        if (!responseHeaders['Access-Control-Allow-Methods']) {
+          responseHeaders['Access-Control-Allow-Methods'] = ['GET, POST, OPTIONS'];
+        }
+        if (!responseHeaders['Access-Control-Allow-Headers']) {
+          responseHeaders['Access-Control-Allow-Headers'] = ['Content-Type, Authorization, Range'];
+        }
+        
+        callback({ responseHeaders });
+      } catch (e) {
+        console.error('Error in onHeadersReceived:', e);
+        callback({ responseHeaders: details.responseHeaders });
+      }
+    });
+
     (async () => {
       createWindow();
     })();
@@ -418,7 +439,7 @@ async function createWindow(): Promise<void> {
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),
         contextIsolation: true,
-        webSecurity: false,
+        webSecurity: true,
         devTools: false,
       }
     });
