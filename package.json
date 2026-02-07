@@ -43,7 +43,8 @@
       "loader.html",
       "torrent-wizard.html",
       "magnet-input.html",
-      "prebuilts/adblock.txt"
+      "prebuilts/adblock.txt",
+      "icons/256x256.png"
     ],
     "protocols": [
       {
@@ -83,6 +84,7 @@
     "linux": {
       "asar": false,
       "target": "AppImage",
+      "icon": "icons/256x256.png",
       "artifactName": "Raspberry.Setup.${version}_${arch}.${ext}",
       "category": "AudioVideo",
       "extraFiles": [

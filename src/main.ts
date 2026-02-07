@@ -413,7 +413,7 @@ async function createWindow(): Promise<void> {
       height: screen.getPrimaryDisplay().workAreaSize.height,
       darkTheme: true,
       backgroundColor: "#000",
-      icon: 'icon.png',
+      icon: path.join(__dirname, '..', 'icons', '256x256.png'),
       show: false,
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),
