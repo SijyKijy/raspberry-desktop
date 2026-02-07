@@ -24,6 +24,5 @@ contextBridge.exposeInMainWorld("electronAPI", {
       document.body.removeChild(messageElement);
     }, 500);
   },
-  openMirrorSelection: () => ipcRenderer.send("open-mirror-selection"),
   openParserSelection: () => ipcRenderer.send("open-parser-selection"),
 });
