@@ -33,7 +33,7 @@
       "owner": "reyohoho",
       "repo": "reyohoho-desktop"
     },
-    "productName": "ReYohoho",
+    "productName": "Raspberry",
     "appId": "ru.reyohoho",
     "files": [
       "dist/main.js",
@@ -47,7 +47,7 @@
     ],
     "protocols": [
       {
-        "name": "ReYohoho",
+        "name": "Raspberry",
         "schemes": [
           "reyohoho"
         ]
@@ -57,7 +57,7 @@
       "asar": false,
       "target": "nsis",
       "icon": "icons/256x256.png",
-      "artifactName": "ReYohoho.Setup.${version}_${arch}.${ext}",
+      "artifactName": "Raspberry.Setup.${version}_${arch}.${ext}",
       "extraFiles": [
         {
           "from": "prebuilts/windows/player",
@@ -72,7 +72,7 @@
     "mac": {
       "asar": false,
       "target": "dmg",
-      "artifactName": "ReYohoho.Setup.${version}_${arch}.${ext}",
+      "artifactName": "Raspberry.Setup.${version}_${arch}.${ext}",
       "extraFiles": [
         {
           "from": "prebuilts/adblock.txt",
@@ -83,7 +83,7 @@
     "linux": {
       "asar": false,
       "target": "AppImage",
-      "artifactName": "ReYohoho.Setup.${version}_${arch}.${ext}",
+      "artifactName": "Raspberry.Setup.${version}_${arch}.${ext}",
       "category": "AudioVideo",
       "extraFiles": [
         {
@@ -93,7 +93,7 @@
       ],
       "desktop": {
         "entry": {
-          "Name": "ReYohoho",
+          "Name": "Raspberry",
           "Terminal": "false",
           "Type": "Application",
           "MimeType": "x-scheme-handler/reyohoho"
