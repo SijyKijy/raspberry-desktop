@@ -438,8 +438,8 @@ async function createWindow(): Promise<void> {
       show: false,
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),
-        contextIsolation: true,
-        webSecurity: true,
+        contextIsolation: false,
+        webSecurity: false,
         devTools: false,
       }
     });

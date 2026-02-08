@@ -1,6 +1,6 @@
-const { contextBridge, ipcRenderer } = require("electron/renderer");
+const { ipcRenderer } = require("electron/renderer");
 
-contextBridge.exposeInMainWorld("electronAPI", {
+window.electronAPI = {
   sendHotKey: (key) => ipcRenderer.send("on-hotkey", key),
   showToast: (message) => {
     const messageElement = document.createElement("div");
@@ -25,4 +25,4 @@ contextBridge.exposeInMainWorld("electronAPI", {
     }, 500);
   },
   openParserSelection: () => ipcRenderer.send("open-parser-selection"),
-});
+};
