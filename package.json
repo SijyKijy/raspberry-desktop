@@ -1,6 +1,6 @@
 {
   "name": "ReYohoho",
-  "version": "2.0.7",
+  "version": "2.0.8",
   "main": "dist/main.js",
   "author": "ReYohoho",
   "type": "module",
@@ -47,10 +47,11 @@
       "dist/mirror-preload.js",
       "package.json",
       "loader.html",
-      "auth-window.html",
       "torrent-wizard.html",
       "magnet-input.html",
+      "auth-window.html",
       "mirror-selection.html",
+      "proxy-settings.html",
       "prebuilts/adblock.txt",
       "icons/256x256.png"
     ],
