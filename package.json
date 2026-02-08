@@ -43,6 +43,7 @@
       "loader.html",
       "torrent-wizard.html",
       "magnet-input.html",
+      "proxy-settings.html",
       "prebuilts/adblock.txt",
       "icons/256x256.png"
     ],
