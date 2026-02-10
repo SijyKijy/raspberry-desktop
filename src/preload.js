@@ -29,4 +29,5 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveProxySettings: (settings) => ipcRenderer.invoke("save-proxy-settings", settings),
   closeProxyWindow: () => ipcRenderer.send("close-proxy-window"),
   openProxySettings: () => ipcRenderer.send("open-proxy-settings"),
+  executeInIframe: (script) => ipcRenderer.invoke("execute-in-iframe", script),
 });
