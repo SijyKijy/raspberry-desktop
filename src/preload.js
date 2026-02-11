@@ -1,6 +1,6 @@
-const { ipcRenderer } = require("electron/renderer");
+const { contextBridge, ipcRenderer } = require("electron");
 
-window.electronAPI = {
+const api = {
   sendHotKey: (key) => ipcRenderer.send("on-hotkey", key),
   showToast: (message) => {
     const messageElement = document.createElement("div");
@@ -29,4 +29,11 @@ window.electronAPI = {
   saveProxySettings: (settings) => ipcRenderer.invoke("save-proxy-settings", settings),
   closeProxyWindow: () => ipcRenderer.send("close-proxy-window"),
   openProxySettings: () => ipcRenderer.send("open-proxy-settings"),
+  executeInIframe: (script) => ipcRenderer.invoke("execute-in-iframe", script),
 };
+
+if (process.contextIsolated) {
+  contextBridge.exposeInMainWorld("electronAPI", api);
+} else {
+  window.electronAPI = api;
+}

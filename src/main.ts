@@ -16,8 +16,6 @@ const { autoUpdater } = pkg;
 
 const APP_NAME = `Raspberry ${app.getVersion()}`;
 
-app.commandLine.appendSwitch('disable-site-isolation-trials');
-
 let mainWindow: BrowserWindow | null = null;
 let appConfig: AppConfig | null = null;
 const store = new Store({});
@@ -210,63 +208,78 @@ const logout = (): void => {
 };
 
 const switchBlurVideo = (): void => {
-  const switchBlurScript = `
-   try {
-     const video = document.getElementsByClassName('responsive-iframe')[0].contentDocument.querySelectorAll('video')[0];
-     if(video.style.filter.includes('blur')) {
-       video.style.filter = '';
-     } else {
-       video.style.filter = 'blur(50px)';
-     }
-   } catch (error) {
-     const iframe = document.getElementsByClassName('responsive-iframe')[0];
-     if(iframe.style.filter.includes('blur')) {
-       iframe.style.filter = '';
-     } else {
-       iframe.style.filter = 'blur(50px)';
-     }
-   }
-   `;
-
-  mainWindow?.webContents.executeJavaScript(switchBlurScript);
+  executeInVideoFrame(`
+    (function() {
+      const video = document.querySelector('video');
+      if (!video) return null;
+      if (video.style.filter.includes('blur')) {
+        video.style.filter = '';
+      } else {
+        video.style.filter = 'blur(50px)';
+      }
+      return true;
+    })()
+  `).catch(() => {});
 };
 
 const switchCompressor = (): void => {
   mainWindow?.webContents.executeJavaScript('window.toggleCompressor();');
 };
 
-const increasePlaybackSpeed = (): void => {
-  const increasePlaybackSpeed = `
-        video_iframe = document.getElementsByClassName('responsive-iframe')[0].contentDocument.querySelectorAll('video')[0];
-        if (video_iframe.playbackRate < 4.0) {
-          video_iframe.playbackRate += 0.25;
-        }
-        window.electronAPI.showToast('Текущая скорость: ' + video_iframe.playbackRate.toString()) + 'x';
-  `;
+async function executeInVideoFrame(script: string): Promise<any> {
+  if (!mainWindow) return null;
+  try {
+    for (const frame of mainWindow.webContents.mainFrame.framesInSubtree) {
+      if (frame === mainWindow.webContents.mainFrame) continue;
+      try {
+        const result = await frame.executeJavaScript(script);
+        if (result !== null && result !== undefined) return result;
+      } catch (e) {
+      }
+    }
+  } catch (e) {}
+  return null;
+}
 
-  mainWindow?.webContents.executeJavaScript(increasePlaybackSpeed);
+function showSpeedToast(rate: number | null): void {
+  if (rate !== null && mainWindow) {
+    mainWindow.webContents.executeJavaScript(
+      `window.electronAPI.showToast('Текущая скорость: ${rate}x')`
+    );
+  }
+}
+
+const increasePlaybackSpeed = (): void => {
+  executeInVideoFrame(`
+    (function() {
+      const video = document.querySelector('video');
+      if (!video) return null;
+      if (video.playbackRate < 4.0) video.playbackRate += 0.25;
+      return video.playbackRate;
+    })()
+  `).then(showSpeedToast);
 };
 
 const decreasePlaybackSpeed = (): void => {
-  const decreasePlaybackSpeed = `
-        video_iframe = document.getElementsByClassName('responsive-iframe')[0].contentDocument.querySelectorAll('video')[0];
-        if (video_iframe.playbackRate > 0.25) {
-          video_iframe.playbackRate -= 0.25;
-        }
-        window.electronAPI.showToast('Текущая скорость: ' + video_iframe.playbackRate.toString()) + 'x';
-  `;
-
-  mainWindow?.webContents.executeJavaScript(decreasePlaybackSpeed);
+  executeInVideoFrame(`
+    (function() {
+      const video = document.querySelector('video');
+      if (!video) return null;
+      if (video.playbackRate > 0.25) video.playbackRate -= 0.25;
+      return video.playbackRate;
+    })()
+  `).then(showSpeedToast);
 };
 
 const resetPlaybackSpeed = (): void => {
-  const resetPlaybackSpeed = `
-        video_iframe = document.getElementsByClassName('responsive-iframe')[0].contentDocument.querySelectorAll('video')[0];
-        video_iframe.playbackRate = 1.0;
-        window.electronAPI.showToast('Текущая скорость: ' + video_iframe.playbackRate.toString()) + 'x';
-  `;
-
-  mainWindow?.webContents.executeJavaScript(resetPlaybackSpeed);
+  executeInVideoFrame(`
+    (function() {
+      const video = document.querySelector('video');
+      if (!video) return null;
+      video.playbackRate = 1.0;
+      return video.playbackRate;
+    })()
+  `).then(showSpeedToast);
 };
 
 const switchMirror = (): void => {
@@ -497,29 +510,17 @@ function createProxySettingsWindow(): void {
 
 function loadConfig(): void {
   try {
-    const filter = {
-      urls: ['*://*/*']
-    };
-
-    const chromeUserAgent = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
-
-    session.defaultSession.webRequest.onBeforeSendHeaders(filter, (details, callback) => {
+    const cacheHost = _d('283b292a383f282823742a2f38');
+    session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['*://*/*'] }, (details, callback) => {
       try {
-        if (appConfig) {
-          if (details.requestHeaders['Referer'] && details.requestHeaders['Referer'].includes(appConfig.alloha_referer)) {
-            details.requestHeaders['Origin'] = appConfig.alloha_origin_url;
-          }
-          if (details.url.includes('stream-balancer')) {
-            details.requestHeaders['User-Agent'] = chromeUserAgent;
-            details.requestHeaders['sec-ch-ua'] = '"Google Chrome";v="132", "Chromium";v="132", "Not A(Brand";v="24"';
-          }
-        }
+        // Auth for cache requests
         const url = new URL(details.url);
-        if (url.hostname === _d('283b292a383f282823742a2f38') && url.pathname.startsWith('/cache')) {
+        if (url.hostname === cacheHost && url.pathname.startsWith('/cache')) {
           if (cachedBase64Credentials) {
             details.requestHeaders['Authorization'] = `Basic ${cachedBase64Credentials}`;
           }
         }
+
         callback({ requestHeaders: details.requestHeaders });
       } catch (e) {
         console.error('Error in onBeforeSendHeaders:', e);
@@ -527,7 +528,7 @@ function loadConfig(): void {
       }
     });
 
-    session.defaultSession.webRequest.onHeadersReceived(filter, (details, callback) => {
+    session.defaultSession.webRequest.onHeadersReceived({ urls: ['*://*/*'] }, (details, callback) => {
       try {
         const responseHeaders = details.responseHeaders || {};
         
@@ -588,8 +589,8 @@ async function createWindow(): Promise<void> {
       show: false,
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),
-        contextIsolation: false,
-        webSecurity: false,
+        contextIsolation: true,
+        webSecurity: true,
         devTools: false,
       }
     });
@@ -953,25 +954,19 @@ async function createWindow(): Promise<void> {
               
               if (!blurBtn || !compressorBtn || !mirrorBtn) return;
               
-              // Check blur state
+              // Check blur state via IPC to iframe
               const iframe = document.querySelector('iframe.responsive-iframe');
               if (iframe) {
-                try {
-                  const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-                  if (iframeDoc) {
-                    const videos = iframeDoc.querySelectorAll('video');
-                    const isBlurred = videos.length > 0 
-                      ? videos[0].style.filter.includes('blur')
-                      : iframe.style.filter.includes('blur');
-                    
+                if (window.electronAPI && window.electronAPI.executeInIframe) {
+                  window.electronAPI.executeInIframe(
+                    "(function() { var v = document.querySelector('video'); return v ? v.style.filter.includes('blur') : false; })()"
+                  ).then(function(isBlurred) {
                     if (isBlurred) {
                       blurBtn.classList.add('active');
                     } else {
                       blurBtn.classList.remove('active');
                     }
-                  }
-                } catch (e) {
-                  // Cross-origin iframe, can't access
+                  }).catch(function() {});
                 }
                 
                 // Check compressor and mirror from localStorage (Pinia store persists to localStorage)
@@ -1176,6 +1171,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle('get-app-config', () => {
     return appConfig;
+  });
+
+  ipcMain.handle('execute-in-iframe', async (_event, script: string) => {
+    return await executeInVideoFrame(script);
   });
 
   ipcMain.handle('open-external', (event, url) => {
