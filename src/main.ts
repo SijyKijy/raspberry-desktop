@@ -411,7 +411,7 @@ async function applyProxyForMode(mode: 'site_only' | 'all'): Promise<void> {
     try {
       mainSiteHostname = new URL(main_site_url).hostname;
     } catch {}
-    const targetHost = mainSiteHostname || 'raspberry.pub';
+    const targetHost = mainSiteHostname;
 
     const pacScript = `
       function FindProxyForURL(url, host) {
